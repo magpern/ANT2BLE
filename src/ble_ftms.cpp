@@ -21,14 +21,15 @@ void BLEFTMS::begin() {
     // ✅ Configure BLE Advertising
     NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
 
-    // ✅ Add services
-    adv->addServiceUUID(NimBLEUUID((uint16_t)0x1826)); // Fitness Machine Service
-    adv->addServiceUUID(NimBLEUUID((uint16_t)0x1818)); // Cycling Power Service
-
     // ✅ Create advertisement data
     NimBLEAdvertisementData advertisementData;
     advertisementData.setFlags(0x06); // LE General Discoverable, BR/EDR Not Supported
     advertisementData.setAppearance(0x0484); // Cycling Power Sensor
+
+    // ✅ Explicitly add Complete List of 16-bit Service UUIDs (FTMS + Cycling Power)
+    std::vector<uint8_t> serviceUUIDs = { 0x05, 0x03, 0x26, 0x18, 0x18, 0x18 };
+    advertisementData.addData(serviceUUIDs);
+    
 
     // ✅ Apply advertisement data
     adv->setAdvertisementData(advertisementData);
@@ -54,10 +55,36 @@ void BLEFTMS::setupFTMS() {
     NimBLEServer *server = NimBLEDevice::createServer();
     NimBLEService *ftmsService = server->createService(NimBLEUUID((uint16_t) 0x1826)); // FTMS Service UUID
 
+    // ✅ Indoor Bike Data (Notify)
     indoorBikeChar = ftmsService->createCharacteristic(
         NimBLEUUID((uint16_t) 0x2AD2), // Indoor Bike Data UUID
         NIMBLE_PROPERTY::NOTIFY
     );
+
+    // ✅ Fitness Machine Feature (Read)
+    fitnessMachineFeatureChar = ftmsService->createCharacteristic(
+        NimBLEUUID((uint16_t) 0x2ACC), // Fitness Machine Feature UUID
+        NIMBLE_PROPERTY::READ
+    );
+
+    // ✅ Set Read Callback for Fitness Machine Feature
+    // ✅ Correctly store the value in a uint32_t buffer
+    uint8_t ftmsFeatureValue[8] = { 0x02, 0x40, 0x00, 0x00,  // Fitness Machine Features
+        0x00, 0x00, 0x00, 0x00 }; // Target Setting Features
+    fitnessMachineFeatureChar->setValue((uint8_t*)&ftmsFeatureValue, sizeof(ftmsFeatureValue));
+
+    // ✅ Fitness Machine Status (Notify)
+    fitnessMachineStatusChar = ftmsService->createCharacteristic(
+        NimBLEUUID((uint16_t) 0x2ADA), // Fitness Machine Status UUID
+        NIMBLE_PROPERTY::NOTIFY
+    );
+
+    // ✅ Training Status (Notify)
+    trainingStatusChar = ftmsService->createCharacteristic(
+        NimBLEUUID((uint16_t) 0x2AD3), // Training Status UUID
+        NIMBLE_PROPERTY::NOTIFY
+    );
+
 
     ftmsService->start();
 }
@@ -85,6 +112,40 @@ void BLEFTMS::sendIndoorBikeData(uint16_t power, uint16_t speed, uint8_t cadence
     } else {
         LOG("[ERROR] BLE Indoor Bike Characteristic is NULL!");
     }
+
+    // ✅ Notify Fitness Machine Status (if applicable)
+    if (power > 0 || speed > 0) {
+        sendFitnessMachineStatus(0x01, 0x00);  // Event: Started
+        sendTrainingStatus(0x02, 0x00);  // Training Status: Active Training
+    } else {
+        sendFitnessMachineStatus(0x02, 0x00);  // Event: Stopped
+        sendTrainingStatus(0x05, 0x00);  // Training Status: Cooling Down
+    }
+}
+
+
+void BLEFTMS::sendFitnessMachineStatus(uint8_t event, uint8_t parameter) {
+    if (!fitnessMachineStatusChar) {
+        LOG("[ERROR] Fitness Machine Status characteristic is NULL!");
+        return;
+    }
+
+    uint8_t statusData[2] = { event, parameter };  // FTMS Status format
+
+    LOGF("[DEBUG] Sending FTMS Status: Event=0x%02X, Parameter=0x%02X", event, parameter);
+    fitnessMachineStatusChar->notify(reinterpret_cast<const uint8_t*>(statusData), sizeof(statusData));
+}
+
+void BLEFTMS::sendTrainingStatus(uint8_t status, uint8_t additionalInfo) {
+    if (!trainingStatusChar) {
+        LOG("[ERROR] Training Status characteristic is NULL!");
+        return;
+    }
+
+    uint8_t trainingData[2] = { status, additionalInfo };  // FTMS Training Status format
+
+    LOGF("[DEBUG] Sending Training Status: Status=0x%02X, Info=0x%02X", status, additionalInfo);
+    trainingStatusChar->notify(reinterpret_cast<const uint8_t*>(trainingData), sizeof(trainingData));
 }
 
 
