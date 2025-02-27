@@ -1,0 +1,32 @@
+# PlatformIO
+.pio/
+.build/
+libdeps/
+project-conf.toml
+
+# VS Code
+.vscode/
+*.code-workspace
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw*
+
+# MacOS
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# Python (for PlatformIO scripting)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Logs and temp files
+*.log
+*.tmp
