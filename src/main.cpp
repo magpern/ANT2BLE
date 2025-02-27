@@ -17,6 +17,8 @@ void setup() {
 
     LOG("ESP32-S3 ANT+ to BLE FTMS");
 
+    // ✅ Ensure NimBLE logs go through logger
+    setupLogger();
     // ✅ Redirect all `printf` calls to use logger
     esp_log_set_vprintf(logger_vprintf);
 

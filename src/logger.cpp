@@ -1,6 +1,7 @@
 #include "logger.h"
+#include "esp_log.h"
 
-// ✅ Ensure logger output always ends with a newline
+// ✅ Define `logger_vprintf` only in `logger.cpp`
 int logger_vprintf(const char *format, va_list args) {
     char buffer[256];  // Buffer to hold formatted text
     int len = vsnprintf(buffer, sizeof(buffer), format, args);
@@ -13,3 +14,8 @@ int logger_vprintf(const char *format, va_list args) {
     return len;
 }
 
+// ✅ Setup NimBLE & ESP-IDF Logging
+void setupLogger() {
+    esp_log_set_vprintf(logger_vprintf);
+    esp_log_level_set("*", ESP_LOG_DEBUG);  // ✅ Set global log level to DEBUG
+}

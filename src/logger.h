@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <stdarg.h>
 
+// ✅ Define logger instance
 #ifdef DEBUG
     #define logger Serial1
     #define LOG(x) logger.println(x)
@@ -14,7 +15,8 @@
     #define LOGF(x, ...)  // No-op in release
 #endif
 
-// ✅ Declare the function, but do NOT define it here
+// ✅ Declare function instead of defining it
 extern int logger_vprintf(const char *format, va_list args);
+extern void setupLogger();
 
 #endif  // LOGGER_H

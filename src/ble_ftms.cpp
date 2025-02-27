@@ -12,24 +12,40 @@ void BLEFTMS::begin() {
 
     LOGF("[DEBUG] BLE Device Name: %s", bleName.c_str());
 
-    // ✅ Ensure BLE is initialized with the correct name
+    // ✅ Ensure BLE is initialized BEFORE advertising
     NimBLEDevice::init(bleName.c_str());
 
     // ✅ Create BLE services
     setupFTMS();
 
-    // ✅ Ensure advertising includes the device name
+    // ✅ Configure BLE Advertising
     NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
-    adv->addServiceUUID(NimBLEUUID((uint16_t)0x1826)); // Advertise FTMS Service
 
-    if (!adv->setName(bleName.c_str())) {
-        LOG("[ERROR] Failed to set BLE device name in advertising!");
-    } else {
-        LOG("[DEBUG] BLE Device Name Set Successfully in Advertising");
-    }
+    // ✅ Add services
+    adv->addServiceUUID(NimBLEUUID((uint16_t)0x1826)); // Fitness Machine Service
+    adv->addServiceUUID(NimBLEUUID((uint16_t)0x1818)); // Cycling Power Service
 
-    adv->start();  // ✅ Start advertising only here
+    // ✅ Create advertisement data
+    NimBLEAdvertisementData advertisementData;
+    advertisementData.setFlags(0x06); // LE General Discoverable, BR/EDR Not Supported
+    advertisementData.setAppearance(0x0484); // Cycling Power Sensor
 
+    // ✅ Apply advertisement data
+    adv->setAdvertisementData(advertisementData);
+
+    // ✅ Add Scan Response Data (For the Device Name)
+    NimBLEAdvertisementData scanResponseData;
+    scanResponseData.setName(bleName.c_str());  // ✅ Force Name into Scan Response
+
+    // ✅ Manufacturer Data (Placeholder for Reserved ID <0x2502>)
+    uint8_t manufacturerData[] = {0x21, 0x48}; 
+    scanResponseData.setManufacturerData(manufacturerData, sizeof(manufacturerData));
+
+    // ✅ Apply Scan Response Data
+    adv->setScanResponseData(scanResponseData);
+
+    // ✅ Start advertising
+    adv->start();
     LOG("[DEBUG] BLE Advertising Started...");
 }
 
