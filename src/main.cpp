@@ -34,7 +34,11 @@ void loop() {
 
     if (antParser.hasNewData()) {
         BLEData data = antParser.getBLEData();
-        bleFTMS.sendIndoorBikeData(data.power, data.speed, data.cadence);
+        FTMSData ftmsData;
+        ftmsData.power = data.power;
+        ftmsData.speed = data.speed;
+        ftmsData.cadence = data.cadence;
+        bleFTMS.sendIndoorBikeData(ftmsData);
         LOGF("[DEBUG] BLE FTMS Update: Power=%dW, Speed=%d km/h, Cadence=%d rpm", 
             data.power, data.speed, data.cadence);
     }

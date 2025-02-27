@@ -90,23 +90,43 @@ void BLEFTMS::setupFTMS() {
 }
 
 // 🔹 Prepare FTMS Indoor Bike Data for BLE notification
-void BLEFTMS::prepareFTMSData(uint8_t* data, uint16_t power, uint16_t speed, uint8_t cadence) {
-    data[0] = 0x04 | 0x02;  // Flags: Power & Cadence present
-    data[1] = power & 0xFF;  // Power LSB
-    data[2] = (power >> 8) & 0xFF;  // Power MSB
-    data[3] = speed & 0xFF;  // Speed LSB
-    data[4] = (speed >> 8) & 0xFF;  // Speed MSB
-    data[5] = cadence;  // Cadence
+void BLEFTMS::prepareFTMSData(uint8_t* data, const FTMSData& ftmsData) {
+    data[0] = 0x74;  // ✅ Flags: Speed, Cadence, Distance, Resistance, Power, Elapsed Time present
+    data[1] = 0x08;
+
+    // ✅ Instantaneous Speed (Little-Endian)
+    data[2] = ftmsData.speed & 0xFF;
+    data[3] = (ftmsData.speed >> 8) & 0xFF;
+
+    // ✅ Instantaneous Cadence (Little-Endian)
+    data[4] = ftmsData.cadence & 0xFF;
+    data[5] = (ftmsData.cadence >> 8) & 0xFF;
+
+    // ✅ Total Distance (Little-Endian)
+    data[6] = ftmsData.distance & 0xFF;
+    data[7] = (ftmsData.distance >> 8) & 0xFF;
+
+    // ✅ Resistance Level
+    data[8] = ftmsData.resistance;
+
+    // ✅ Instantaneous Power (Little-Endian)
+    data[9] = ftmsData.power & 0xFF;
+    data[10] = (ftmsData.power >> 8) & 0xFF;
+
+    // ✅ Elapsed Time (Little-Endian)
+    data[11] = ftmsData.elapsedTime & 0xFF;
+    data[12] = (ftmsData.elapsedTime >> 8) & 0xFF;
 }
 
-// 🔹 Send FTMS BLE Notification
-void BLEFTMS::sendIndoorBikeData(uint16_t power, uint16_t speed, uint8_t cadence) {
-    uint8_t data[8] = {0};
-    prepareFTMSData(data, power, speed, cadence);
 
-    LOGF("[DEBUG] Sending BLE FTMS: Power=%dW, Speed=%d km/h, Cadence=%d rpm", 
-        power, speed, cadence);
-    
+// 🔹 Send FTMS BLE Notification
+void BLEFTMS::sendIndoorBikeData(const FTMSData& ftmsData) {
+    uint8_t data[14] = {0};  // ✅ Increased buffer size for full FTMS message
+    prepareFTMSData(data, ftmsData);
+
+    LOGF("[DEBUG] Sending BLE FTMS: Power=%dW, Speed=%d km/h, Cadence=%d rpm, Distance=%d m, Resistance=%d, Elapsed Time=%d s",
+        ftmsData.power, ftmsData.speed, ftmsData.cadence, ftmsData.distance, ftmsData.resistance, ftmsData.elapsedTime);
+
     if (indoorBikeChar) {
         indoorBikeChar->notify((const uint8_t*)data, sizeof(data));
     } else {
@@ -114,7 +134,7 @@ void BLEFTMS::sendIndoorBikeData(uint16_t power, uint16_t speed, uint8_t cadence
     }
 
     // ✅ Notify Fitness Machine Status (if applicable)
-    if (power > 0 || speed > 0) {
+    if (ftmsData.power > 0 || ftmsData.speed > 0) {
         sendFitnessMachineStatus(0x01, 0x00);  // Event: Started
         sendTrainingStatus(0x02, 0x00);  // Training Status: Active Training
     } else {
@@ -122,6 +142,7 @@ void BLEFTMS::sendIndoorBikeData(uint16_t power, uint16_t speed, uint8_t cadence
         sendTrainingStatus(0x05, 0x00);  // Training Status: Cooling Down
     }
 }
+
 
 
 void BLEFTMS::sendFitnessMachineStatus(uint8_t event, uint8_t parameter) {

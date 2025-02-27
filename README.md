@@ -94,6 +94,7 @@ pio device monitor -b 115200 -p /dev/ttyACM0
 ### **Manually Send ANT+ Test Message**
 
 ```sh
+stty -F /dev/ttyACM0 115200 raw 
 printf "\xA4\x09\x1E\x00\x00\x45\x23\x55\x67\x89\xCA" > /dev/ttyACM0
 ```
 
