@@ -22,6 +22,8 @@ public:
     void sendTrainingStatus(uint8_t status, uint8_t additionalInfo);
     void prepareFTMSData(uint8_t* data, const FTMSData& ftmsData);
     String getDeviceMAC();
+    void setConnectCallback(void (*callback)());
+    void setDisconnectCallback(void (*callback)());
 
     
 private:

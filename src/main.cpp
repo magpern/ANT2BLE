@@ -2,14 +2,21 @@
 #include "ant_parser.h"
 #include "ble_ftms.h"
 #include "logger.h"
-#include "esp_system.h"  // ESP32 system functions
+#include "esp_system.h"
+#include "esp_timer.h"  // ✅ ESP32 Software Timer API
 
 #define SERIAL_BAUDRATE 115200
+#define FTMS_UPDATE_INTERVAL_US (2000000)  // 2 seconds in microseconds
 
 void checkForReboot();  // Function declaration
+void sendFTMSUpdate(void* arg);  // Timer callback function
+void onBLEConnect();  // Function to start sending data
+void onBLEDisconnect();  // Function to stop sending data
 
 ANTParser antParser;
 BLEFTMS bleFTMS;
+esp_timer_handle_t ftmsTimer;  // ✅ ESP32 Timer Handle
+bool isBLEConnected = false;   // ✅ Track BLE connection status
 
 void setup() {
     Serial.begin(SERIAL_BAUDRATE);  // ANT+ Data Input (Raspberry Pi -> ESP32)
@@ -19,34 +26,88 @@ void setup() {
 
     // ✅ Ensure NimBLE logs go through logger
     setupLogger();
-    // ✅ Redirect all `printf` calls to use logger
-    esp_log_set_vprintf(logger_vprintf);
+    esp_log_set_vprintf(logger_vprintf);  // Redirect all `printf` calls to use logger
 
     // Initialize BLE FTMS
     bleFTMS.begin();
 
+    // Register BLE Callbacks
+    bleFTMS.setConnectCallback(onBLEConnect);
+    bleFTMS.setDisconnectCallback(onBLEDisconnect);
+
     // Print unique ESP32-S3 MAC address
     LOG("Device MAC: " + bleFTMS.getDeviceMAC());
+
+    // ✅ Set up FTMS update timer (but don't start it yet)
+    const esp_timer_create_args_t timerArgs = {
+        .callback = &sendFTMSUpdate,
+        .arg = nullptr,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "FTMS Update Timer"
+    };
+    esp_timer_create(&timerArgs, &ftmsTimer);
 }
 
 void loop() {
     antParser.readSerial();
-
-    if (antParser.hasNewData()) {
-        BLEData data = antParser.getBLEData();
-        FTMSData ftmsData;
-        ftmsData.power = data.power;
-        ftmsData.speed = data.speed;
-        ftmsData.cadence = data.cadence;
-        bleFTMS.sendIndoorBikeData(ftmsData);
-        LOGF("[DEBUG] BLE FTMS Update: Power=%dW, Speed=%d km/h, Cadence=%d rpm", 
-            data.power, data.speed, data.cadence);
-    }
-
     checkForReboot();  // Check if "reboot" command is received
+
+    // ✅ Restart advertising if it stops
+    if (!NimBLEDevice::getAdvertising()->isAdvertising()) {
+        LOG("[WARN] BLE Advertising Stopped! Restarting...");
+        NimBLEDevice::getAdvertising()->start(0);  // Restart indefinitely
+    }
 }
 
-// Function to listen for "reboot" command on Serial1
+// ✅ Timer Callback Function (Runs Every 2 Seconds When Connected)
+void sendFTMSUpdate(void* arg) {
+    if (!isBLEConnected) {
+        LOG("[DEBUG] No BLE connection, skipping FTMS update.");
+        return;
+    }
+
+    FTMSDataStorage ftmsStorage = antParser.getFTMSData();
+
+    // ✅ If no valid data, use default values
+    if (!ftmsStorage.hasData) {
+        LOG("[DEBUG] No ANT+ data received, sending default values.");
+        ftmsStorage.speed = 0;
+        ftmsStorage.power = 0;
+        ftmsStorage.cadence = 0;
+        ftmsStorage.distance = 0;
+        ftmsStorage.elapsed_time = 0;
+        ftmsStorage.resistance = 13;  // Default resistance
+    }
+
+    // ✅ Convert `FTMSDataStorage` to `FTMSData`
+    FTMSData ftmsData;
+    ftmsData.power = ftmsStorage.power;
+    ftmsData.speed = ftmsStorage.speed;
+    ftmsData.cadence = ftmsStorage.cadence;
+    ftmsData.distance = ftmsStorage.distance;
+    ftmsData.elapsedTime = ftmsStorage.elapsed_time;
+    ftmsData.resistance = ftmsStorage.resistance;
+
+    bleFTMS.sendIndoorBikeData(ftmsData);
+    LOGF("[DEBUG] BLE FTMS Update: Power=%dW, Speed=%d km/h, Cadence=%d rpm, Distance=%d m, Resistance=%d, Elapsed Time=%d s",
+        ftmsData.power, ftmsData.speed, ftmsData.cadence, ftmsData.distance, ftmsData.resistance, ftmsData.elapsedTime);
+}
+
+// ✅ BLE Connect Callback → Start Sending Data
+void onBLEConnect() {
+    LOG("[INFO] BLE Device Connected! Starting FTMS updates.");
+    isBLEConnected = true;
+    esp_timer_start_periodic(ftmsTimer, FTMS_UPDATE_INTERVAL_US);  // ✅ Start Timer
+}
+
+// ✅ BLE Disconnect Callback → Stop Sending Data
+void onBLEDisconnect() {
+    LOG("[INFO] BLE Device Disconnected! Stopping FTMS updates.");
+    isBLEConnected = false;
+    esp_timer_stop(ftmsTimer);  // ✅ Stop Timer
+}
+
+// ✅ Function to Listen for "Reboot" Command
 void checkForReboot() {
     static char inputBuffer[10];  // Small buffer for command
     static uint8_t index = 0;
@@ -81,5 +142,3 @@ void checkForReboot() {
         esp_restart();
     }
 }
-
-

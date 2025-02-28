@@ -11,28 +11,22 @@
 #define PAGE_PRODUCT_INFO 0x51     // Page 81
 
 ANTParser::ANTParser() {
-    bleData = {0, 0, 0};
+    ftmsData = {};  // Initialize all values to defaults
     newData = false;
 }
 
 void ANTParser::processANTMessage(uint8_t *data, uint8_t length) {
-    if (length != 8) {
-        LOG("[ERROR] Invalid ANT+ message length");
-        return;
-    }
 
-    AntFeData feData = {};
-    feData.page = data[0];
-
-    switch (feData.page) {
+    uint8_t page = data[0];
+    switch (page) {
         case PAGE_GENERAL_FE_DATA:
-            parseGeneralFeData(data, feData);
+            parseGeneralFeData(data);
             break;
         case PAGE_TRAINER_DATA:
-            parseTrainerData(data, feData);
+            parseTrainerData(data);
             break;
         case PAGE_TRAINER_STATUS:
-            parseTrainerStatus(data, feData);
+            parseTrainerStatus(data);
             break;
         case PAGE_MANUFACTURER_ID:
             parseManufacturerID(data);
@@ -41,32 +35,65 @@ void ANTParser::processANTMessage(uint8_t *data, uint8_t length) {
             parseProductInfo(data);
             break;
         default:
-            LOGF("[WARN] Unhandled ANT+ Page: 0x%02X", feData.page);
+            LOGF("[WARN] Unhandled ANT+ Page: 0x%02X", page);
             return;
     }
 
-    // Convert ANT+ parsed data to BLEData format
-    bleData.power = feData.power;
-    bleData.speed = feData.speed;
-    bleData.cadence = feData.cadence;
+    // ✅ Mark data as valid once any valid ANT+ message is received
+    ftmsData.hasData = true;
     newData = true;
+}
 
-    LOGF("[DEBUG] Parsed ANT+ Data: Power=%dW, Speed=%d km/h, Cadence=%d rpm",
-         bleData.power, bleData.speed, bleData.cadence);
+FTMSDataStorage ANTParser::getFTMSData() {
+    return ftmsData;
+}
+
+void ANTParser::parseGeneralFeData(const uint8_t* data) {
+    ftmsData.elapsed_time = 0;  // ✅ Always 0
+    ftmsData.distance = 0;  // ✅ Always 0
+    ftmsData.speed = ((data[4] | (data[5] << 8)) * 0.001) * 3.6;  // ✅ Convert to km/h
+    ftmsData.heart_rate = 0xFF;  // ✅ Always invalid
+    ftmsData.fe_state = (data[7] >> 4);  // ✅ Extract FE State
+
+    LOGF("[ANT+] General FE Data - Speed: %.2f km/h, HR: 0x%X, State: %d",
+         ftmsData.speed, ftmsData.heart_rate, ftmsData.fe_state);
 }
 
 
-BLEData ANTParser::getBLEData() {
-    return bleData;
+
+void ANTParser::parseTrainerData(const uint8_t* data) {
+    ftmsData.cadence = data[5];
+
+    LOGF("[ANT+] Trainer Data - Cadence: %d rpm", ftmsData.cadence);
 }
 
-bool ANTParser::hasNewData() {
-    if (newData) {
-        newData = false;  // ✅ Reset flag after processing
-        return true;
-    }
-    return false;
+void ANTParser::parseTrainerStatus(const uint8_t* data) {
+    ftmsData.cycle_length = data[3] * 0.01;  // ✅ Convert to meters
+    ftmsData.incline = (int16_t)(data[4] | (data[5] << 8)) * 0.01;  // ✅ Convert to percentage
+    ftmsData.resistance = data[6] * 0.5;  // ✅ Convert to % of max resistance
+    ftmsData.fe_state = (data[7] >> 4);  // ✅ Extract FE State
+
+    LOGF("[ANT+] Trainer Status - Cycle Length: %.2fm, Incline: %.2f%%, Resistance: %.1f%%, State: %d",
+         ftmsData.cycle_length, ftmsData.incline, ftmsData.resistance, ftmsData.fe_state);
 }
+
+
+void ANTParser::parseManufacturerID(const uint8_t* data) {
+    ftmsData.manufacturerID = data[2] | (data[3] << 8);
+    ftmsData.serialNumber = data[4] | (data[5] << 8);
+
+    LOGF("[ANT+] Manufacturer ID - Manufacturer: %d, Serial: %d",
+         ftmsData.manufacturerID, ftmsData.serialNumber);
+}
+
+void ANTParser::parseProductInfo(const uint8_t* data) {
+    ftmsData.softwareVersion = (data[3] * 100) + data[2];  // ✅ Correct SW Version encoding
+    ftmsData.serialNumber = (data[4] | (data[5] << 8) | (data[6] << 16) | (data[7] << 24));  // ✅ 4-byte Serial Number
+
+    LOGF("[ANT+] Product Info - Software Version: %d.%d, Serial Number: %u",
+         ftmsData.softwareVersion / 100, ftmsData.softwareVersion % 100, ftmsData.serialNumber);
+}
+
 
 void ANTParser::readSerial() {
     static uint8_t buffer[32];  // Buffer for ANT+ messages and serial commands
@@ -114,12 +141,12 @@ void ANTParser::readSerial() {
 
             LOG("[DEBUG] CRC Check Passed ✅");
 
-            // ✅ Strip Sync Byte and CRC Before Processing
-            uint8_t payloadLength = expectedLength - 3;  // Remove Sync Byte & CRC
+            // ✅ Corrected Payload Extraction
+            uint8_t payloadLength = expectedLength - 2;  // ✅ Remove Sync Byte & CRC
             uint8_t processedMessage[payloadLength];
 
-            for (uint8_t i = 0; i < payloadLength; i++) { // 
-                processedMessage[i] = buffer[i + 2];  // Shift left to remove Sync Byte and length
+            for (uint8_t i = 0; i < payloadLength; i++) {
+                processedMessage[i] = buffer[i + 2];  // ✅ Corrected Start Index
             }
 
             // ✅ Detect Custom or ANT+ Message
@@ -148,23 +175,22 @@ bool ANTParser::validateCRC(uint8_t *payload, uint8_t length, uint8_t expectedCR
 }
 
 void ANTParser::processSerialCommand(uint8_t *data, uint8_t length) {
-    if (length < 4) {  // Ensure there's a valid payload
+    if (length < 2) {  // Ensure there's a valid payload
         LOG("[ERROR] Invalid Serial Command: Too Short");
         return;
     }
 
-    // ✅ Extract command as a string (excluding sync byte, length, and CRC)
+    // ✅ Extract command as a string
     String command = "";
-    for (int i = 1; i < length; i++) {  
+    for (int i = 0; i < length; i++) {  
         command += (char)data[i];
     }
 
     LOGF("[DEBUG] Received Serial Command: %s", command.c_str());
 
-    // ✅ Handle "SETNAME" Command
     if (command.startsWith("SETNAME ")) {
-        String newName = command.substring(8);  // Extract name after "SETNAME "
-        if (newName.length() < 3 || newName.length() > 20) {  // Validate name length
+        String newName = command.substring(8);  
+        if (newName.length() < 3 || newName.length() > 20) {
             LOG("[ERROR] Invalid BLE Name: Must be 3-20 characters");
             return;
         }
@@ -177,74 +203,11 @@ void ANTParser::processSerialCommand(uint8_t *data, uint8_t length) {
         LOG("[INFO] Rebooting to apply changes...");
         delay(500);
         esp_restart();
-    }
-    // ✅ Handle "REBOOT" Command
-    else if (command == "REBOOT") {
+    } else if (command == "REBOOT") {
         LOG("[INFO] Reboot command received! Restarting ESP32...");
         delay(500);
         esp_restart();
-    }
-    // ✅ Handle "STATUS" Command
-    else if (command == "STATUS") {
-        LOG("[INFO] Sending System Status...");
-        LOGF("[INFO] BLE Device Name: %s", preferences.getString("ble_name", "ESP32-S3 FTMS").c_str());
-        LOGF("[INFO] Device MAC: %s", NimBLEDevice::getAddress().toString().c_str());
-    }
-    // ✅ Handle "HELP" Command
-    else if (command == "HELP") {
-        LOG("[INFO] Available Commands:");
-        LOG("[INFO]  - SETNAME <new_name> : Change BLE device name");
-        LOG("[INFO]  - REBOOT            : Restart ESP32");
-        LOG("[INFO]  - STATUS            : Display system status");
-        LOG("[INFO]  - HELP              : Show this help message");
-    }
-    else {
+    } else {
         LOGF("[ERROR] Unknown Command: %s", command.c_str());
     }
-}
-
-
-// Parse General Fitness Equipment Data (Page 16 / 0x10)
-void ANTParser::parseGeneralFeData(const uint8_t* data, AntFeData& feData) {
-    feData.elapsed_time = data[1];
-    feData.distance = data[2];
-    feData.speed = (data[3] | (data[4] << 8)) / 100; // Convert to km/h
-    feData.power = (data[6] | (data[7] << 8));
-
-    LOGF("[ANT+] General FE Data - Time: %d s, Distance: %d m, Speed: %d km/h, Power: %d W",
-         feData.elapsed_time, feData.distance, feData.speed, feData.power);
-}
-
-void ANTParser::parseTrainerData(const uint8_t* data, AntFeData& feData) {
-    feData.elapsed_time = data[1];
-    feData.distance = data[2];
-    feData.speed = (data[3] | (data[4] << 8)) / 100; // Convert to km/h
-    feData.cadence = data[5];
-    feData.power = (data[6] | (data[7] << 8));
-
-    LOGF("[ANT+] Trainer Data - Time: %d s, Distance: %d m, Speed: %d km/h, Cadence: %d rpm, Power: %d W",
-         feData.elapsed_time, feData.distance, feData.speed, feData.cadence, feData.power);
-}
-
-void ANTParser::parseTrainerStatus(const uint8_t* data, AntFeData& feData) {
-    feData.resistance = data[4];
-
-    LOGF("[ANT+] Trainer Status - Resistance: %d", feData.resistance);
-}
-
-void ANTParser::parseManufacturerID(const uint8_t* data) {
-    uint8_t hardwareRev = data[1];
-    uint16_t manufacturerID = data[2] | (data[3] << 8);
-    uint16_t serialNumber = data[4] | (data[5] << 8);
-
-    LOGF("[ANT+] Manufacturer ID - Manufacturer: %d, Hardware Rev: %d, Serial: %d",
-         manufacturerID, hardwareRev, serialNumber);
-}
-
-void ANTParser::parseProductInfo(const uint8_t* data) {
-    uint8_t softwareVersion = data[1];
-    uint8_t modelNumber = data[2];
-
-    LOGF("[ANT+] Product Info - Software Version: %d, Model Number: %d",
-         softwareVersion, modelNumber);
 }

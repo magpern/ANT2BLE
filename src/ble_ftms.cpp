@@ -3,6 +3,17 @@
 #include "global.h"
 
 BLEFTMS::BLEFTMS() {}
+static void (*onConnectCallback)() = nullptr;
+static void (*onDisconnectCallback)() = nullptr;
+
+void BLEFTMS::setConnectCallback(void (*callback)()) {
+    onConnectCallback = callback;
+}
+
+void BLEFTMS::setDisconnectCallback(void (*callback)()) {
+    onDisconnectCallback = callback;
+}
+
 
 void BLEFTMS::begin() {
     preferences.begin("ble_ftms", false);  // Open storage
@@ -29,7 +40,6 @@ void BLEFTMS::begin() {
     // ✅ Explicitly add Complete List of 16-bit Service UUIDs (FTMS + Cycling Power)
     std::vector<uint8_t> serviceUUIDs = { 0x05, 0x03, 0x26, 0x18, 0x18, 0x18 };
     advertisementData.addData(serviceUUIDs);
-    
 
     // ✅ Apply advertisement data
     adv->setAdvertisementData(advertisementData);
@@ -46,13 +56,36 @@ void BLEFTMS::begin() {
     adv->setScanResponseData(scanResponseData);
 
     // ✅ Start advertising
-    adv->start();
+    adv->start(0);  // ✅ Start advertising indefinitely
     LOG("[DEBUG] BLE Advertising Started...");
 }
 
-
 void BLEFTMS::setupFTMS() {
     NimBLEServer *server = NimBLEDevice::createServer();
+
+    // ✅ Register BLE connection & disconnection event handlers
+    class MyServerCallbacks : public NimBLEServerCallbacks {
+        void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override {
+            LOG("[INFO] BLE Device Connected!");
+            if (onConnectCallback) {
+                onConnectCallback();  // ✅ Notify `main.cpp` about connection
+            }
+        }
+
+        void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
+            LOGF("[INFO] BLE Device Disconnected! Reason: %d", reason);
+            if (onDisconnectCallback) {
+                onDisconnectCallback();  // ✅ Notify `main.cpp` about disconnection
+            }
+
+            // ✅ Restart advertising when a device disconnects
+            LOG("[INFO] Restarting BLE Advertising...");
+            NimBLEDevice::getAdvertising()->start(0);
+        }
+    };
+
+    server->setCallbacks(new MyServerCallbacks());  // ✅ Assign Callbacks
+
     NimBLEService *ftmsService = server->createService(NimBLEUUID((uint16_t) 0x1826)); // FTMS Service UUID
 
     // ✅ Indoor Bike Data (Notify)
@@ -67,12 +100,6 @@ void BLEFTMS::setupFTMS() {
         NIMBLE_PROPERTY::READ
     );
 
-    // ✅ Set Read Callback for Fitness Machine Feature
-    // ✅ Correctly store the value in a uint32_t buffer
-    uint8_t ftmsFeatureValue[8] = { 0x02, 0x40, 0x00, 0x00,  // Fitness Machine Features
-        0x00, 0x00, 0x00, 0x00 }; // Target Setting Features
-    fitnessMachineFeatureChar->setValue((uint8_t*)&ftmsFeatureValue, sizeof(ftmsFeatureValue));
-
     // ✅ Fitness Machine Status (Notify)
     fitnessMachineStatusChar = ftmsService->createCharacteristic(
         NimBLEUUID((uint16_t) 0x2ADA), // Fitness Machine Status UUID
@@ -85,14 +112,15 @@ void BLEFTMS::setupFTMS() {
         NIMBLE_PROPERTY::NOTIFY
     );
 
-
     ftmsService->start();
 }
 
+
 // 🔹 Prepare FTMS Indoor Bike Data for BLE notification
 void BLEFTMS::prepareFTMSData(uint8_t* data, const FTMSData& ftmsData) {
-    data[0] = 0x74;  // ✅ Flags: Speed, Cadence, Distance, Resistance, Power, Elapsed Time present
-    data[1] = 0x08;
+    // ✅ Correct FTMS Flags: Speed, Cadence, Distance (24-bit), Resistance, Power, Elapsed Time
+    data[0] = 0x75;  // Updated Flags
+    data[1] = 0x08;  // Ensure correct feature presence
 
     // ✅ Instantaneous Speed (Little-Endian)
     data[2] = ftmsData.speed & 0xFF;
@@ -102,26 +130,26 @@ void BLEFTMS::prepareFTMSData(uint8_t* data, const FTMSData& ftmsData) {
     data[4] = ftmsData.cadence & 0xFF;
     data[5] = (ftmsData.cadence >> 8) & 0xFF;
 
-    // ✅ Total Distance (Little-Endian)
+    // ✅ Total Distance (24-bit Little-Endian)
     data[6] = ftmsData.distance & 0xFF;
     data[7] = (ftmsData.distance >> 8) & 0xFF;
+    data[8] = (ftmsData.distance >> 16) & 0xFF;
 
     // ✅ Resistance Level
-    data[8] = ftmsData.resistance;
+    data[9] = ftmsData.resistance;
 
     // ✅ Instantaneous Power (Little-Endian)
-    data[9] = ftmsData.power & 0xFF;
-    data[10] = (ftmsData.power >> 8) & 0xFF;
+    data[10] = ftmsData.power & 0xFF;
+    data[11] = (ftmsData.power >> 8) & 0xFF;
 
     // ✅ Elapsed Time (Little-Endian)
-    data[11] = ftmsData.elapsedTime & 0xFF;
-    data[12] = (ftmsData.elapsedTime >> 8) & 0xFF;
+    data[12] = ftmsData.elapsedTime & 0xFF;
+    data[13] = (ftmsData.elapsedTime >> 8) & 0xFF;
 }
-
 
 // 🔹 Send FTMS BLE Notification
 void BLEFTMS::sendIndoorBikeData(const FTMSData& ftmsData) {
-    uint8_t data[14] = {0};  // ✅ Increased buffer size for full FTMS message
+    uint8_t data[14] = {0};  // ✅ Ensure Correct Buffer Size
     prepareFTMSData(data, ftmsData);
 
     LOGF("[DEBUG] Sending BLE FTMS: Power=%dW, Speed=%d km/h, Cadence=%d rpm, Distance=%d m, Resistance=%d, Elapsed Time=%d s",
@@ -142,8 +170,6 @@ void BLEFTMS::sendIndoorBikeData(const FTMSData& ftmsData) {
         sendTrainingStatus(0x05, 0x00);  // Training Status: Cooling Down
     }
 }
-
-
 
 void BLEFTMS::sendFitnessMachineStatus(uint8_t event, uint8_t parameter) {
     if (!fitnessMachineStatusChar) {
@@ -168,7 +194,6 @@ void BLEFTMS::sendTrainingStatus(uint8_t status, uint8_t additionalInfo) {
     LOGF("[DEBUG] Sending Training Status: Status=0x%02X, Info=0x%02X", status, additionalInfo);
     trainingStatusChar->notify(reinterpret_cast<const uint8_t*>(trainingData), sizeof(trainingData));
 }
-
 
 String BLEFTMS::getDeviceMAC() {
     return NimBLEDevice::getAddress().toString().c_str();
