@@ -32,8 +32,6 @@ struct FTMSDataStorage {
                         incline(0), resistance(0), fe_state(0), manufacturerID(0), serialNumber(0),
                         softwareVersion(0), modelNumber(0), virtual_speed(0), hardware_revision(0), trainer_status(0), maxResistance(0), hasData(false) {}
 };
-
-
 class ANTParser {
     public:
         ANTParser();

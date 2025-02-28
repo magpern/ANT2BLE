@@ -33,8 +33,8 @@ public:
     BLEFTMS();
     void begin();
     void sendIndoorBikeData(const FTMSData &ftmsData);
-    void sendFitnessMachineStatus(uint8_t event, uint8_t parameter);
-    void sendTrainingStatus(uint8_t status, uint8_t additionalInfo);
+    void sendFitnessMachineStatus(const FTMSData &ftmsData);
+    void sendTrainingStatus(const FTMSData &ftmsData);
     void prepareFTMSData(uint8_t* data, const FTMSData& ftmsData);
     String getDeviceMAC();
     void setConnectCallback(void (*callback)());

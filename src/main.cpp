@@ -94,10 +94,12 @@ void sendFTMSUpdate(void* arg) {
 
     FTMSData ftmsData = mapFTMSData(antParser.getFTMSData());
 
+
     bleFTMS.sendIndoorBikeData(ftmsData);
     LOGF("[DEBUG] BLE FTMS Update: Power=%dW, Speed=%d km/h, Cadence=%d rpm, Distance=%d m, Resistance=%d, Elapsed Time=%d s",
         ftmsData.power, ftmsData.speed, ftmsData.cadence, ftmsData.distance, ftmsData.resistance, ftmsData.elapsedTime);
 }
+
 
 // ✅ BLE Connect Callback → Start Sending Data
 void onBLEConnect() {

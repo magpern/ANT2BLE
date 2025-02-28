@@ -117,42 +117,52 @@ void BLEFTMS::setupFTMS() {
 
 // 🔹 Prepare FTMS Indoor Bike Data for BLE notification
 void BLEFTMS::prepareFTMSData(uint8_t* data, const FTMSData& ftmsData) {
-    // ✅ Correct FTMS Flags: Speed, Cadence, Distance (24-bit), Resistance, Power, Elapsed Time
-    data[0] = 0x75;  // Updated Flags
-    data[1] = 0x08;  // Ensure correct feature presence
+    // ✅ 1. Set Flags: Speed, Cadence, Distance, Resistance, Power, Elapsed Time
+    data[0] = 0x75;  // ✅ Ensure Speed, Cadence, Distance (24-bit), Resistance, Power, Time are present
+    data[1] = 0x08;  // ✅ Ensure correct feature presence
 
-    // ✅ Instantaneous Speed (Little-Endian)
-    data[2] = ftmsData.speed & 0xFF;
-    data[3] = (ftmsData.speed >> 8) & 0xFF;
+    // ✅ 2. Convert Speed from km/h → m/s (0.01 m/s resolution)
+    uint16_t speed_mps = static_cast<uint16_t>((ftmsData.speed * 1000) / 36);  // Convert km/h → 0.01 m/s
+    data[2] = speed_mps & 0xFF;
+    data[3] = (speed_mps >> 8) & 0xFF;
 
-    // ✅ Instantaneous Cadence (Little-Endian)
-    data[4] = ftmsData.cadence & 0xFF;
-    data[5] = (ftmsData.cadence >> 8) & 0xFF;
+    // ✅ 3. Instantaneous Cadence (Little-Endian)
+    uint16_t cadence = static_cast<uint16_t>(ftmsData.cadence);
+    data[4] = cadence & 0xFF;
+    data[5] = (cadence >> 8) & 0xFF;
 
-    // ✅ Total Distance (24-bit Little-Endian)
-    data[6] = ftmsData.distance & 0xFF;
-    data[7] = (ftmsData.distance >> 8) & 0xFF;
-    data[8] = (ftmsData.distance >> 16) & 0xFF;
+    // ✅ 4. Total Distance (24-bit Little-Endian)
+    uint32_t distance = ftmsData.distance;
+    data[6] = distance & 0xFF;
+    data[7] = (distance >> 8) & 0xFF;
+    data[8] = (distance >> 16) & 0xFF;
 
-    // ✅ Resistance Level
-    data[9] = ftmsData.resistance;
+    // ✅ 5. Resistance Level
+    uint8_t resistance = static_cast<uint8_t>(ftmsData.resistance);
+    data[9] = resistance;
 
-    // ✅ Instantaneous Power (Little-Endian)
-    data[10] = ftmsData.power & 0xFF;
-    data[11] = (ftmsData.power >> 8) & 0xFF;
+    // ✅ 6. Instantaneous Power (Little-Endian)
+    int16_t power = static_cast<int16_t>(ftmsData.instantaneousPower);
+    data[10] = power & 0xFF;
+    data[11] = (power >> 8) & 0xFF;
 
-    // ✅ Elapsed Time (Little-Endian)
-    data[12] = ftmsData.elapsedTime & 0xFF;
-    data[13] = (ftmsData.elapsedTime >> 8) & 0xFF;
+    // ✅ 7. Elapsed Time (Little-Endian)
+    uint16_t elapsedTime = static_cast<uint16_t>(ftmsData.elapsedTime);
+    data[12] = elapsedTime & 0xFF;
+    data[13] = (elapsedTime >> 8) & 0xFF;
 }
+
 
 // 🔹 Send FTMS BLE Notification
 void BLEFTMS::sendIndoorBikeData(const FTMSData& ftmsData) {
     uint8_t data[14] = {0};  // ✅ Ensure Correct Buffer Size
     prepareFTMSData(data, ftmsData);
 
-    LOGF("[DEBUG] Sending BLE FTMS: Power=%dW, Speed=%d km/h, Cadence=%d rpm, Distance=%d m, Resistance=%d, Elapsed Time=%d s",
-        ftmsData.power, ftmsData.speed, ftmsData.cadence, ftmsData.distance, ftmsData.resistance, ftmsData.elapsedTime);
+    LOGF("[DEBUG] Sending BLE FTMS: Power=%dW, Speed=%d km/h (0x%02X%02X), Cadence=%d rpm (0x%02X%02X), Distance=%d m (0x%02X%02X%02X), Resistance=%d, Elapsed Time=%d s (0x%02X%02X)",
+        ftmsData.power, ftmsData.speed, data[3], data[2], 
+        ftmsData.cadence, data[5], data[4], 
+        ftmsData.distance, data[8], data[7], data[6], 
+        ftmsData.resistance, ftmsData.elapsedTime, data[13], data[12]);
 
     if (indoorBikeChar) {
         indoorBikeChar->notify((const uint8_t*)data, sizeof(data));
@@ -161,38 +171,82 @@ void BLEFTMS::sendIndoorBikeData(const FTMSData& ftmsData) {
     }
 
     // ✅ Notify Fitness Machine Status (if applicable)
-    if (ftmsData.power > 0 || ftmsData.speed > 0) {
-        sendFitnessMachineStatus(0x01, 0x00);  // Event: Started
-        sendTrainingStatus(0x02, 0x00);  // Training Status: Active Training
-    } else {
-        sendFitnessMachineStatus(0x02, 0x00);  // Event: Stopped
-        sendTrainingStatus(0x05, 0x00);  // Training Status: Cooling Down
-    }
+    sendFitnessMachineStatus(ftmsData);
+
+    // ✅ Send Training Status (0x2AD3)
+    sendTrainingStatus(ftmsData);
 }
 
-void BLEFTMS::sendFitnessMachineStatus(uint8_t event, uint8_t parameter) {
+void BLEFTMS::sendFitnessMachineStatus(const FTMSData& ftmsData) {
     if (!fitnessMachineStatusChar) {
         LOG("[ERROR] Fitness Machine Status characteristic is NULL!");
         return;
     }
 
-    uint8_t statusData[2] = { event, parameter };  // FTMS Status format
+    uint8_t eventID = 0x02;  // Default: Stopped
+    uint8_t eventParam = 0x00;
 
-    LOGF("[DEBUG] Sending FTMS Status: Event=0x%02X, Parameter=0x%02X", event, parameter);
+    // ✅ Map ANT+ `fe_state` to FTMS Event IDs
+    switch (ftmsData.feState) {
+        case 1:  // ASLEEP
+            eventID = 0x02;  // Stopped
+            break;
+        case 2:  // READY
+            eventID = 0x03;  // Idle
+            break;
+        case 3:  // IN USE
+            eventID = 0x01;  // Started
+            break;
+        case 4:  // FINISHED (Paused)
+            eventID = 0x04;  // Paused
+            break;
+        default:
+            eventID = 0x02;  // Default to Stopped
+    }
+
+    uint8_t statusData[2] = { eventID, eventParam };
+
+    LOGF("[DEBUG] Sending FTMS Status: Event=0x%02X, Parameter=0x%02X", eventID, eventParam);
     fitnessMachineStatusChar->notify(reinterpret_cast<const uint8_t*>(statusData), sizeof(statusData));
 }
 
-void BLEFTMS::sendTrainingStatus(uint8_t status, uint8_t additionalInfo) {
+
+void BLEFTMS::sendTrainingStatus(const FTMSData& ftmsData) {
     if (!trainingStatusChar) {
         LOG("[ERROR] Training Status characteristic is NULL!");
         return;
     }
 
-    uint8_t trainingData[2] = { status, additionalInfo };  // FTMS Training Status format
+    uint8_t statusID = 0x01;  // Default: Not in Training
+    uint8_t additionalInfo = 0x00;
 
-    LOGF("[DEBUG] Sending Training Status: Status=0x%02X, Info=0x%02X", status, additionalInfo);
+    // ✅ Map ANT+ `trainer_status` to FTMS Training Status IDs
+    switch (ftmsData.trainerStatus) {
+        case 1:  // NO ACTIVITY
+            statusID = 0x01;  // Not in Training
+            break;
+        case 2:  // WARMING UP
+            statusID = 0x06;  // Warming Up
+            break;
+        case 3:  // ACTIVE TRAINING
+            statusID = 0x02;  // Active Training
+            break;
+        case 4:  // PAUSED / RESTING
+            statusID = 0x05;  // Paused
+            break;
+        case 5:  // COOLING DOWN
+            statusID = 0x07;  // Cooling Down
+            break;
+        default:
+            statusID = 0x01;  // Default to Not in Training
+    }
+
+    uint8_t trainingData[2] = { statusID, additionalInfo };
+
+    LOGF("[DEBUG] Sending Training Status: Status=0x%02X, Info=0x%02X", statusID, additionalInfo);
     trainingStatusChar->notify(reinterpret_cast<const uint8_t*>(trainingData), sizeof(trainingData));
 }
+
 
 String BLEFTMS::getDeviceMAC() {
     return NimBLEDevice::getAddress().toString().c_str();
