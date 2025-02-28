@@ -10,6 +10,7 @@ struct FTMSDataStorage {
     float speed;
     uint8_t heart_rate;
     uint16_t power;
+    uint8_t virtual_speed; 
     uint16_t accumulated_power;
     uint16_t instantaneous_power;
     uint8_t cadence;
@@ -21,12 +22,15 @@ struct FTMSDataStorage {
     uint32_t serialNumber;
     uint16_t softwareVersion;
     uint16_t modelNumber;
+    uint8_t hardware_revision; 
+    uint8_t trainer_status;
+    uint16_t maxResistance;
     bool hasData;
 
     FTMSDataStorage() : elapsed_time(0), distance(0), speed(0), heart_rate(0), power(0),
                         accumulated_power(0), instantaneous_power(0), cadence(0), cycle_length(0),
                         incline(0), resistance(0), fe_state(0), manufacturerID(0), serialNumber(0),
-                        softwareVersion(0), modelNumber(0), hasData(false) {}
+                        softwareVersion(0), modelNumber(0), virtual_speed(0), hardware_revision(0), trainer_status(0), maxResistance(0), hasData(false) {}
 };
 
 
@@ -48,7 +52,8 @@ class ANTParser {
         void parseGeneralFeData(const uint8_t* data);
         void parseTrainerData(const uint8_t* data);
         void parseTrainerStatus(const uint8_t* data);
-        void parseManufacturerID(const uint8_t* data);
+        void parseFECapabilities(const uint8_t *data);
+        void parseManufacturerID(const uint8_t *data);
         void parseProductInfo(const uint8_t* data);
 };
 
