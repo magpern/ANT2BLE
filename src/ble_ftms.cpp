@@ -115,7 +115,6 @@ void BLEFTMS::setupFTMS() {
     ftmsService->start();
 }
 
-
 // 🔹 Prepare FTMS Indoor Bike Data for BLE notification
 void BLEFTMS::prepareFTMSData(uint8_t* data, const FTMSData& ftmsData) {
     // ✅ Correct FTMS Flags: Speed, Cadence, Distance (24-bit), Resistance, Power, Elapsed Time

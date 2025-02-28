@@ -4,13 +4,28 @@
 #include <Arduino.h>
 #include <NimBLEDevice.h>
 
+
 struct FTMSData {
-    uint16_t power;
-    uint16_t speed;
-    uint8_t cadence;
-    uint16_t distance;
-    uint8_t resistance;
     uint16_t elapsedTime;
+    uint32_t distance;
+    uint16_t speed;
+    uint8_t heartRate;
+    uint16_t power;
+    uint8_t virtualSpeed;
+    uint16_t accumulatedPower;
+    uint16_t instantaneousPower;
+    uint8_t cadence;
+    float cycleLength;
+    float incline;
+    float resistance;
+    uint8_t feState;
+    uint16_t manufacturerID;
+    uint32_t serialNumber;
+    uint16_t softwareVersion;
+    uint16_t modelNumber;
+    uint8_t hardwareRevision;
+    uint8_t trainerStatus;
+    uint16_t maxResistance;
 };
 
 class BLEFTMS {

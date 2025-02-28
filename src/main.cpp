@@ -59,6 +59,32 @@ void loop() {
     }
 }
 
+// Mapper function to convert FTMSDataStorage to FTMSData
+FTMSData mapFTMSData(const FTMSDataStorage& storage) {
+    FTMSData data;
+    data.elapsedTime = storage.elapsed_time;
+    data.distance = storage.distance;
+    data.speed = storage.speed;
+    data.heartRate = storage.heart_rate;
+    data.power = storage.power;
+    data.virtualSpeed = storage.virtual_speed;
+    data.accumulatedPower = storage.accumulated_power;
+    data.instantaneousPower = storage.instantaneous_power;
+    data.cadence = storage.cadence;
+    data.cycleLength = storage.cycle_length;
+    data.incline = storage.incline;
+    data.resistance = storage.resistance;
+    data.feState = storage.fe_state;
+    data.manufacturerID = storage.manufacturerID;
+    data.serialNumber = storage.serialNumber;
+    data.softwareVersion = storage.softwareVersion;
+    data.modelNumber = storage.modelNumber;
+    data.hardwareRevision = storage.hardware_revision;
+    data.trainerStatus = storage.trainer_status;
+    data.maxResistance = storage.maxResistance;
+    return data;
+}
+
 // ✅ Timer Callback Function (Runs Every 2 Seconds When Connected)
 void sendFTMSUpdate(void* arg) {
     if (!isBLEConnected) {
@@ -66,27 +92,7 @@ void sendFTMSUpdate(void* arg) {
         return;
     }
 
-    FTMSDataStorage ftmsStorage = antParser.getFTMSData();
-
-    // ✅ If no valid data, use default values
-    if (!ftmsStorage.hasData) {
-        LOG("[DEBUG] No ANT+ data received, sending default values.");
-        ftmsStorage.speed = 0;
-        ftmsStorage.power = 0;
-        ftmsStorage.cadence = 0;
-        ftmsStorage.distance = 0;
-        ftmsStorage.elapsed_time = 0;
-        ftmsStorage.resistance = 13;  // Default resistance
-    }
-
-    // ✅ Convert `FTMSDataStorage` to `FTMSData`
-    FTMSData ftmsData;
-    ftmsData.power = ftmsStorage.power;
-    ftmsData.speed = ftmsStorage.speed;
-    ftmsData.cadence = ftmsStorage.cadence;
-    ftmsData.distance = ftmsStorage.distance;
-    ftmsData.elapsedTime = ftmsStorage.elapsed_time;
-    ftmsData.resistance = ftmsStorage.resistance;
+    FTMSData ftmsData = mapFTMSData(antParser.getFTMSData());
 
     bleFTMS.sendIndoorBikeData(ftmsData);
     LOGF("[DEBUG] BLE FTMS Update: Power=%dW, Speed=%d km/h, Cadence=%d rpm, Distance=%d m, Resistance=%d, Elapsed Time=%d s",
