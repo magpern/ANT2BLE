@@ -37,6 +37,7 @@ class ANTParser {
         ANTParser();
         void processANTMessage(uint8_t *data, uint8_t length);
         FTMSDataStorage getFTMSData();  // ✅ Return collected FTMS data
+        void resetFTMData();
         bool hasNewData();
         void readSerial();
 

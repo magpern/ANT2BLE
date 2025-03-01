@@ -10,13 +10,20 @@
     #define LOG(x) logger.println(x)
     #define LOGF(x, ...) logger.printf(x, ##__VA_ARGS__), logger.println()
 #else
-    #define logger if (false) Serial
+    class NullLogger {
+    public:
+        void begin(...) {}
+        void print(...) {}
+        void println(...) {}
+        void printf(...) {}
+        void flush() {}
+        bool available() { return false; }  // Prevents errors in `while (logger.available())`
+        int read() { return -1; }  // Simulate no input
+    };
+
+    extern NullLogger logger;  // Declare logger as a NullLogger instance
     #define LOG(x)  // No-op in release
     #define LOGF(x, ...)  // No-op in release
 #endif
-
-// ✅ Declare function instead of defining it
-extern int logger_vprintf(const char *format, va_list args);
-extern void setupLogger();
 
 #endif  // LOGGER_H

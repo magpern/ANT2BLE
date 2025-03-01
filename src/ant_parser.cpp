@@ -52,6 +52,11 @@ FTMSDataStorage ANTParser::getFTMSData() {
     return ftmsData;
 }
 
+void ANTParser::resetFTMData() {
+    ftmsData = {};  // Reset all fields to default values
+    newData = false;
+}
+
 void ANTParser::parseGeneralFeData(const uint8_t* data) {
     // ✅ Extract Equipment Type
     uint8_t equipmentType = data[1];  
@@ -93,8 +98,7 @@ void ANTParser::parseTrainerData(const uint8_t* data) {
     ftmsData.instantaneous_power = (instantaneousPower == 0xFFF) ? 0 : instantaneousPower;
 
     // ✅ Extract Trainer Status (Bits 4-7 of Byte 6)
-    ftmsData.trainer_status = (data[6] >> 4);
-
+    ftmsData.trainer_status = (data[6] & 0x07);
     // ✅ Extract Flags (Bits 0-3 of Byte 7)
     ftmsData.virtual_speed = data[7] & 0x01;  // ✅ Bit 0: 1 = Virtual, 0 = Real
 
@@ -261,6 +265,10 @@ bool ANTParser::validateCRC(uint8_t *payload, uint8_t length, uint8_t expectedCR
     // ✅ XOR all bytes in the payload (starting from `payload[0]`)
     for (uint8_t i = 0; i < length; i++) {  // ✅ Start at 0, stop at last payload byte
         calculatedCRC ^= payload[i];  // XOR each byte
+    }
+
+    if (!(calculatedCRC == expectedCRC)) {
+        LOGF("[DEBUG] Calculated CRC: 0x%02X, Expected CRC: 0x%02X", calculatedCRC, expectedCRC);
     }
 
     //LOGF("[DEBUG] Calculated CRC: 0x%02X, Expected CRC: 0x%02X", calculatedCRC, expectedCRC);

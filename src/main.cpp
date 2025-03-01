@@ -24,10 +24,6 @@ void setup() {
 
     LOG("ESP32-S3 ANT+ to BLE FTMS");
 
-    // ✅ Ensure NimBLE logs go through logger
-    setupLogger();
-    esp_log_set_vprintf(logger_vprintf);  // Redirect all `printf` calls to use logger
-
     // Initialize BLE FTMS
     bleFTMS.begin();
 
@@ -57,32 +53,7 @@ void loop() {
         LOG("[WARN] BLE Advertising Stopped! Restarting...");
         NimBLEDevice::getAdvertising()->start(0);  // Restart indefinitely
     }
-}
-
-// Mapper function to convert FTMSDataStorage to FTMSData
-FTMSData mapFTMSData(const FTMSDataStorage& storage) {
-    FTMSData data;
-    data.elapsedTime = storage.elapsed_time;
-    data.distance = storage.distance;
-    data.speed = storage.speed;
-    data.heartRate = storage.heart_rate;
-    data.power = storage.power;
-    data.virtualSpeed = storage.virtual_speed;
-    data.accumulatedPower = storage.accumulated_power;
-    data.instantaneousPower = storage.instantaneous_power;
-    data.cadence = storage.cadence;
-    data.cycleLength = storage.cycle_length;
-    data.incline = storage.incline;
-    data.resistance = storage.resistance;
-    data.feState = storage.fe_state;
-    data.manufacturerID = storage.manufacturerID;
-    data.serialNumber = storage.serialNumber;
-    data.softwareVersion = storage.softwareVersion;
-    data.modelNumber = storage.modelNumber;
-    data.hardwareRevision = storage.hardware_revision;
-    data.trainerStatus = storage.trainer_status;
-    data.maxResistance = storage.maxResistance;
-    return data;
+    sleep(0.1);  // Save power by sleeping for 0.1 second
 }
 
 // ✅ Timer Callback Function (Runs Every 2 Seconds When Connected)
@@ -92,14 +63,12 @@ void sendFTMSUpdate(void* arg) {
         return;
     }
 
-    FTMSData ftmsData = mapFTMSData(antParser.getFTMSData());
-
+    FTMSDataStorage ftmsData = antParser.getFTMSData();
 
     bleFTMS.sendIndoorBikeData(ftmsData);
-    LOGF("[DEBUG] BLE FTMS Update: Power=%dW, Speed=%d km/h, Cadence=%d rpm, Distance=%d m, Resistance=%d, Elapsed Time=%d s",
-        ftmsData.power, ftmsData.speed, ftmsData.cadence, ftmsData.distance, ftmsData.resistance, ftmsData.elapsedTime);
+    LOGF("[DEBUG] BLE FTMS Update: Power=%dW, Speed=%d km/h, Cadence=%d rpm, Distance=%d m, Resistance=%.1f, Elapsed Time=%d s",
+        ftmsData.power, ftmsData.speed, ftmsData.cadence, ftmsData.distance, ftmsData.resistance, ftmsData.elapsed_time);
 }
-
 
 // ✅ BLE Connect Callback → Start Sending Data
 void onBLEConnect() {
@@ -113,6 +82,7 @@ void onBLEDisconnect() {
     LOG("[INFO] BLE Device Disconnected! Stopping FTMS updates.");
     isBLEConnected = false;
     esp_timer_stop(ftmsTimer);  // ✅ Stop Timer
+    antParser.resetFTMData();  // Reset FTMS data
 }
 
 // ✅ Function to Listen for "Reboot" Command
@@ -122,31 +92,23 @@ void checkForReboot() {
 
     while (logger.available()) {
         char c = logger.read();
-        logger.print("[DEBUG] Received: ");
-        logger.println(c);  // Debug: Show each received character
+        logger.print("[DEBUG] Received char: ");
+        logger.println(c);
 
-        if (c == '\n' || c == '\r') {  // End of command
+        // ✅ Store character unless buffer is full
+        if (index < sizeof(inputBuffer) - 1) {
+            inputBuffer[index++] = c;
             inputBuffer[index] = '\0';  // Null-terminate string
-            logger.print("[DEBUG] Full command: ");
-            logger.println(inputBuffer);
+        }
 
-            if (strcasecmp(inputBuffer, "reboot") == 0) {  // Case-insensitive compare
-                logger.println("[DEBUG] Reboot command received! Restarting ESP32...");
-                delay(500);
-                logger.flush();  // Ensure log output is sent
-                esp_restart();   // Perform software reboot
-            }
-            index = 0;  // Reset buffer index
-        } else if (index < sizeof(inputBuffer) - 1) {
-            inputBuffer[index++] = c;  // Store character
+        // ✅ Check if buffer contains "reboot"
+        if (strcasecmp(inputBuffer, "reboot") == 0) {
+            logger.println("[DEBUG] Reboot command received! Restarting ESP32...");
+            delay(500);
+            logger.flush();
+            esp_restart();  // Perform software reboot
         }
     }
-
-    // 🚀 EXTRA FIX: If full "reboot" command is detected *without newline*
-    if (strcasecmp(inputBuffer, "reboot") == 0) {
-        logger.println("[DEBUG] No newline, but command detected! Restarting...");
-        delay(500);
-        logger.flush();
-        esp_restart();
-    }
 }
+
+
