@@ -16,30 +16,77 @@ ANTParser::ANTParser() {
     newData = false;
 }
 
-void ANTParser::processANTMessage(uint8_t *data, uint8_t length) {
-
+void ANTParser::processANTMessage(uint8_t *data, uint8_t length, DeviceType deviceType) {
     uint8_t page = data[0];
-    switch (page) {
-        case PAGE_GENERAL_FE_DATA:
-            parseGeneralFeData(data);
+
+    if (page >= 0x50 && page <= 0x54) { // Common Data Pages
+        //parseCommonDataPage(data);
+        //return;
+    }
+
+    switch (deviceType) {
+        case DeviceType::FitnessEquipment:
+            switch (page) {
+                case PAGE_GENERAL_FE_DATA:
+                    parseGeneralFeData(data);
+                    break;
+                case PAGE_TRAINER_DATA:
+                    parseTrainerData(data);
+                    break;
+                case PAGE_TRAINER_STATUS:
+                    parseTrainerStatus(data);
+                    break;
+                case PAGE_MANUFACTURER_ID:
+                    parseManufacturerID(data);
+                    break;
+                case PAGE_PRODUCT_INFO:
+                    parseProductInfo(data);
+                    break;
+                case PAGE_FE_Capabilities:
+                    parseFECapabilities(data);
+                    break;
+                default:
+                    LOGF("[WARN] Unhandled ANT+ Page (FE): 0x%02X", page);
+                    return;
+            }
             break;
-        case PAGE_TRAINER_DATA:
-            parseTrainerData(data);
+
+        case DeviceType::PowerMeter:
+            switch (page) {
+                case 0x10:  // Example Power Data Page
+                    //TODO: parsePowerMeterData(data);
+                    break;
+                case 0x50:  // Manufacturer ID
+                    parseManufacturerID(data);
+                    break;
+                case 0x51:  // Product Info
+                    parseProductInfo(data);
+                    break;
+                default:
+                    LOGF("[WARN] Unhandled ANT+ Page (PowerMeter): 0x%02X", page);
+                    return;
+            }
             break;
-        case PAGE_TRAINER_STATUS:
-            parseTrainerStatus(data);
+
+        case DeviceType::BikeCadence:
+            switch (page) {
+                case 0x01:  // Bike Cadence Data Page
+                    //TODO: parseBikeCadenceData(data);
+                    break;
+                case 0x50:  // Manufacturer ID
+                    parseManufacturerID(data);
+                    break;
+                case 0x51:  // Product Info
+                    parseProductInfo(data);
+                    break;
+                default:
+                    LOGF("[WARN] Unhandled ANT+ Page (BikeCadence): 0x%02X", page);
+                    return;
+            }
             break;
-        case PAGE_MANUFACTURER_ID:
-            parseManufacturerID(data);
-            break;
-        case PAGE_PRODUCT_INFO:
-            parseProductInfo(data);
-            break;
-        case PAGE_FE_Capabilities:
-            parseFECapabilities(data);
-            break;
+
         default:
-            LOGF("[WARN] Unhandled ANT+ Page: 0x%02X", page);
+            LOGF("[ERROR] Unknown device type: %d", deviceType);
             return;
     }
 
@@ -47,6 +94,7 @@ void ANTParser::processANTMessage(uint8_t *data, uint8_t length) {
     ftmsData.hasData = true;
     newData = true;
 }
+
 
 FTMSDataStorage ANTParser::getFTMSData() {
     return ftmsData;
@@ -214,43 +262,37 @@ void ANTParser::readSerial() {
 
         buffer[index++] = byteReceived;
 
-        // ✅ Set expected message length correctly (Payload Length + Sync + CRC)
-        if (index == 2) {
-            expectedLength = buffer[1] + 3;  // ✅ Corrected length calculation
+        // ✅ Adjusted expected length calculation (extra device_type byte)
+        if (index == 3) {
+            expectedLength = buffer[2] + 4;  // Length Byte now at buffer[2], includes device_type
         }
 
         // ✅ Process message only when full length is received
         if (index == expectedLength) {
-            /*
-                logger.print("[DEBUG] Message Buffer Before CRC Check: ");
-                for (uint8_t i = 0; i < index; i++) {
-                    logger.printf("%02X ", buffer[i]);
-                }
-                LOG("");  // Newline for formatting
-            */
-            // ✅ Fix: Pass only the length byte + payload (exclude sync & CRC)
-            if (!validateCRC(buffer + 1, index - 2, buffer[index - 1])) {
+            // ✅ Validate CRC (updated offsets)
+            if (!validateCRC(buffer + 2, index - 3, buffer[index - 1])) {  // Adjusted for device_type
                 LOG("[ERROR] CRC Mismatch! Message Discarded.");
                 index = 0;
                 receiving = false;
-                return;  // Ignore corrupted message
+                return;
             }
 
-            //LOG("[DEBUG] CRC Check Passed ✅");
+            // ✅ Extract Device Type from new position (buffer[1])
+            DeviceType deviceType = static_cast<DeviceType>(buffer[1]);
 
-            // ✅ Extract payload correctly (excluding Sync & CRC)
-            uint8_t payloadLength = buffer[1];  // ✅ Correct payload length
+            // ✅ Extract payload correctly (adjusted for extra byte)
+            uint8_t payloadLength = buffer[2];  // Length now at buffer[2]
             uint8_t processedMessage[payloadLength];
 
             for (uint8_t i = 0; i < payloadLength; i++) {
-                processedMessage[i] = buffer[i + 2];  // ✅ Skip Sync & Length Bytes
+                processedMessage[i] = buffer[i + 3];  // Adjusted for device_type byte
             }
 
             // ✅ Detect and process ANT+ or Custom Serial Messages
             if (buffer[0] == 0xF0) {
                 processSerialCommand(processedMessage, payloadLength);
             } else {
-                processANTMessage(processedMessage, payloadLength);
+                processANTMessage(processedMessage, payloadLength, deviceType);
             }
 
             index = 0;
@@ -314,3 +356,40 @@ void ANTParser::processSerialCommand(uint8_t *data, uint8_t length) {
         LOGF("[ERROR] Unknown Command: %s", command.c_str());
     }
 }
+
+void ANTParser::parseCommonDataPage(const uint8_t* data) {
+    uint8_t page = data[0];
+
+    switch (page) {
+        case 0x50: { // Manufacturer ID
+            uint16_t manufacturerID = data[4] | (data[5] << 8);
+            uint16_t modelNumber = data[6] | (data[7] << 8);
+            ftmsData.manufacturerID = manufacturerID;
+            ftmsData.modelNumber = modelNumber;
+            LOGF("[ANT+] Common Data: Manufacturer ID: %d, Model: %d", manufacturerID, modelNumber);
+            break;
+        }
+
+        case 0x51: { // Product Info (Software/Hardware)
+            uint8_t hardwareRevision = data[3];
+            uint8_t softwareVersion = data[2];
+            ftmsData.hardware_revision = hardwareRevision;
+            ftmsData.softwareVersion = softwareVersion;
+            LOGF("[ANT+] Common Data: HW Rev: %d, SW Ver: %d", hardwareRevision, softwareVersion);
+            break;
+        }
+
+        case 0x52: { // Battery Status
+            uint8_t batteryID = data[3];
+            uint8_t batteryVoltage = data[4];
+            ftmsData.batteryStatus = batteryVoltage;
+            LOGF("[ANT+] Battery Data: ID: %d, Voltage: %d", batteryID, batteryVoltage);
+            break;
+        }
+
+        default:
+            LOGF("[WARN] Unknown Common Data Page: 0x%02X", page);
+            return;
+    }
+}
+
