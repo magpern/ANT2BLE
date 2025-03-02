@@ -37,12 +37,14 @@ struct FTMSDataStorage {
     uint8_t trainer_status;
     uint16_t maxResistance;
     uint8_t batteryStatus;
+    uint8_t pedal_power_percent;
+    bool is_right_pedal;
     bool hasData;
 
     FTMSDataStorage() : elapsed_time(0), distance(0), speed(0), heart_rate(0), power(0),
                         accumulated_power(0), instantaneous_power(0), cadence(0), cycle_length(0),
                         incline(0), resistance(0), fe_state(0), manufacturerID(0), serialNumber(0),
-                        softwareVersion(0), modelNumber(0), virtual_speed(0), hardware_revision(0), trainer_status(0), maxResistance(0), batteryStatus(255), hasData(false) {}
+                        softwareVersion(0), modelNumber(0), virtual_speed(0), hardware_revision(0), trainer_status(0), maxResistance(0), batteryStatus(255), pedal_power_percent(0), is_right_pedal(false), hasData(false) {}
 };
 class ANTParser {
     public:
@@ -64,7 +66,8 @@ class ANTParser {
         // ✅ Parsing functions now update only specific fields
         void parseGeneralFeData(const uint8_t* data);
         void parseTrainerData(const uint8_t* data);
-        void parseTrainerStatus(const uint8_t* data);
+        void parsePowerMeterData(const uint8_t *data);
+        void parseTrainerStatus(const uint8_t *data);
         void parseFECapabilities(const uint8_t *data);
         void parseManufacturerID(const uint8_t *data);
         void parseProductInfo(const uint8_t* data);

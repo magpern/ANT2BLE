@@ -41,15 +41,15 @@ def process_ant_data(data, device_num, device_type):
     """Processes ANT+ data and logs it, adding device type after 0xA4"""
     message_length = len(data)  # No Message ID included
 
-    # Compute Checksum (XOR of Length, Device Type, and Data)
-    checksum = message_length ^ device_type
+    # ✅ Compute Checksum (XOR of Data Only) — DO NOT include length
+    checksum = 0  # Start at 0
     for byte in data:
-        checksum ^= byte
+        checksum ^= byte  # ✅ XOR all data bytes (but NOT length!)
 
-    # Construct Full ANT+ Message (0xA4 + Device Type + Length + Data + Checksum)
+    # ✅ Construct Full ANT+ Message (0xA4 + Device Type + Length + Data + Checksum)
     full_message = bytes([0xA4, device_type, message_length]) + bytes(data) + bytes([checksum])
 
-    # Create escaped hex representation for logging
+    # ✅ Create escaped hex representation for logging
     escaped_output = "".join(f"\\x{byte:02X}" for byte in full_message)
 
     log_message = f"📡 Device {device_num} (Type {device_type}): {full_message.hex().upper()} (printf \"{escaped_output}\" > /dev/ttyACM0)"
@@ -66,6 +66,7 @@ def process_ant_data(data, device_num, device_type):
         serial_out.flush()  # Ensure immediate transmission
     except Exception as e:
         print(f"⚠️ Error writing to /dev/ttyACM0: {e}")
+
 
 # ✅ Data handlers for two separate devices
 def on_data_1(data):

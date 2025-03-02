@@ -10,6 +10,8 @@
 #define PAGE_MANUFACTURER_ID 0x50  // Page 80
 #define PAGE_PRODUCT_INFO 0x51     // Page 81
 #define PAGE_FE_Capabilities 0x54  // Page 84
+#define PAGE_BATTERY_STATUS 0x52  // Page 82
+#define PAGE_POWER_ONLY_MAIN_DATA 0x10  // Page 10 (bike)
 
 ANTParser::ANTParser() {
     ftmsData = {};  // Initialize all values to defaults
@@ -20,8 +22,10 @@ void ANTParser::processANTMessage(uint8_t *data, uint8_t length, DeviceType devi
     uint8_t page = data[0];
 
     if (page >= 0x50 && page <= 0x54) { // Common Data Pages
-        //parseCommonDataPage(data);
-        //return;
+        parseCommonDataPage(data);
+        ftmsData.hasData = true;
+        newData = true;
+        return;
     }
 
     switch (deviceType) {
@@ -36,15 +40,6 @@ void ANTParser::processANTMessage(uint8_t *data, uint8_t length, DeviceType devi
                 case PAGE_TRAINER_STATUS:
                     parseTrainerStatus(data);
                     break;
-                case PAGE_MANUFACTURER_ID:
-                    parseManufacturerID(data);
-                    break;
-                case PAGE_PRODUCT_INFO:
-                    parseProductInfo(data);
-                    break;
-                case PAGE_FE_Capabilities:
-                    parseFECapabilities(data);
-                    break;
                 default:
                     LOGF("[WARN] Unhandled ANT+ Page (FE): 0x%02X", page);
                     return;
@@ -53,14 +48,8 @@ void ANTParser::processANTMessage(uint8_t *data, uint8_t length, DeviceType devi
 
         case DeviceType::PowerMeter:
             switch (page) {
-                case 0x10:  // Example Power Data Page
-                    //TODO: parsePowerMeterData(data);
-                    break;
-                case 0x50:  // Manufacturer ID
-                    parseManufacturerID(data);
-                    break;
-                case 0x51:  // Product Info
-                    parseProductInfo(data);
+                case PAGE_POWER_ONLY_MAIN_DATA:  // Example Power Data Page
+                    parsePowerMeterData(data);
                     break;
                 default:
                     LOGF("[WARN] Unhandled ANT+ Page (PowerMeter): 0x%02X", page);
@@ -72,12 +61,6 @@ void ANTParser::processANTMessage(uint8_t *data, uint8_t length, DeviceType devi
             switch (page) {
                 case 0x01:  // Bike Cadence Data Page
                     //TODO: parseBikeCadenceData(data);
-                    break;
-                case 0x50:  // Manufacturer ID
-                    parseManufacturerID(data);
-                    break;
-                case 0x51:  // Product Info
-                    parseProductInfo(data);
                     break;
                 default:
                     LOGF("[WARN] Unhandled ANT+ Page (BikeCadence): 0x%02X", page);
@@ -157,6 +140,45 @@ void ANTParser::parseTrainerData(const uint8_t* data) {
          ftmsData.instantaneous_power, ftmsData.cadence, ftmsData.accumulated_power,
          ftmsData.trainer_status, ftmsData.virtual_speed, ftmsData.fe_state);
 }
+
+void ANTParser::parsePowerMeterData(const uint8_t* data) {
+    // ✅ Extract Update Event Count (Byte 1)
+    //uint8_t eventCount = data[1];
+
+    // ✅ Extract Pedal Power Information (Byte 2)
+    uint8_t pedalPowerRaw = data[2];
+    bool isRightPedal = (pedalPowerRaw & 0x80) != 0; // Bit 7: 1 = Right Pedal, 0 = Unknown
+    uint8_t pedalPowerPercent = pedalPowerRaw & 0x7F; // Bits 0-6: Pedal Power %
+
+    // Handle special case: If `0xFF`, ignore pedal power contribution
+    if (pedalPowerRaw == 0xFF) {
+        pedalPowerPercent = 0;  // Set to zero if not used
+        isRightPedal = false;    // Reset right pedal flag
+    }
+
+    // ✅ Extract Cadence (Byte 3)
+    uint8_t cadence = (data[3] == 0xFF) ? 0 : data[3]; // 0xFF = Invalid Cadence
+
+    // ✅ Extract Accumulated Power (Bytes 4-5, Little-Endian)
+    uint16_t accumulatedPower = data[4] | (data[5] << 8);
+    if (accumulatedPower == 0xFFFF) accumulatedPower = 0; // Invalid data check
+
+    // ✅ Extract Instantaneous Power (Bytes 6-7, Little-Endian)
+    uint16_t instantaneousPower = data[6] | (data[7] << 8);
+    if (instantaneousPower == 0xFFFF) instantaneousPower = 0; // Invalid data check
+
+    // ✅ Store values in data structure
+    ftmsData.is_right_pedal = isRightPedal;
+    ftmsData.pedal_power_percent = pedalPowerPercent;
+    ftmsData.cadence = cadence;
+    ftmsData.accumulated_power = accumulatedPower;
+    ftmsData.instantaneous_power = instantaneousPower;
+
+    // ✅ Debug Output
+    LOGF("[ANT+] Power Meter Data - Pedal: %s, Pedal Power: %d%%, Cadence: %d RPM, Accumulated Power: %d W, Instant Power: %d W",
+         isRightPedal ? "Right" : "Unknown", pedalPowerPercent, cadence, accumulatedPower, instantaneousPower);
+}
+
 
 void ANTParser::parseTrainerStatus(const uint8_t* data) {
     // ✅ Reserved Fields (Ignore)
@@ -270,7 +292,7 @@ void ANTParser::readSerial() {
         // ✅ Process message only when full length is received
         if (index == expectedLength) {
             // ✅ Validate CRC (updated offsets)
-            if (!validateCRC(buffer + 2, index - 3, buffer[index - 1])) {  // Adjusted for device_type
+            if (!validateCRC(buffer + 3, index - 4, buffer[index - 1])) {  // Adjusted for device_type
                 LOG("[ERROR] CRC Mismatch! Message Discarded.");
                 index = 0;
                 receiving = false;
@@ -361,29 +383,26 @@ void ANTParser::parseCommonDataPage(const uint8_t* data) {
     uint8_t page = data[0];
 
     switch (page) {
-        case 0x50: { // Manufacturer ID
-            uint16_t manufacturerID = data[4] | (data[5] << 8);
-            uint16_t modelNumber = data[6] | (data[7] << 8);
-            ftmsData.manufacturerID = manufacturerID;
-            ftmsData.modelNumber = modelNumber;
-            LOGF("[ANT+] Common Data: Manufacturer ID: %d, Model: %d", manufacturerID, modelNumber);
+        case PAGE_MANUFACTURER_ID: { // Manufacturer ID
+            parseManufacturerID(data);
             break;
         }
 
-        case 0x51: { // Product Info (Software/Hardware)
-            uint8_t hardwareRevision = data[3];
-            uint8_t softwareVersion = data[2];
-            ftmsData.hardware_revision = hardwareRevision;
-            ftmsData.softwareVersion = softwareVersion;
-            LOGF("[ANT+] Common Data: HW Rev: %d, SW Ver: %d", hardwareRevision, softwareVersion);
+        case PAGE_PRODUCT_INFO: { // Product Info (Software/Hardware)
+            parseProductInfo(data);
             break;
         }
 
-        case 0x52: { // Battery Status
+        case PAGE_BATTERY_STATUS: { // Battery Status
             uint8_t batteryID = data[3];
             uint8_t batteryVoltage = data[4];
             ftmsData.batteryStatus = batteryVoltage;
             LOGF("[ANT+] Battery Data: ID: %d, Voltage: %d", batteryID, batteryVoltage);
+            break;
+        }
+
+        case PAGE_FE_Capabilities: { // FE Capabilities
+            parseFECapabilities(data);
             break;
         }
 
@@ -392,4 +411,5 @@ void ANTParser::parseCommonDataPage(const uint8_t* data) {
             return;
     }
 }
+
 
