@@ -70,16 +70,16 @@ void loop() {
         NimBLEDevice::getAdvertising()->start(0);  // Restart indefinitely
     }
 
+    /*
     // ✅ Improved WiFi reconnection logic
     if (WiFi.status() != WL_CONNECTED) {
         if (millis() - lastReconnectAttempt > 5000) {  // Retry every 5 seconds
             lastReconnectAttempt = millis();
-            Serial.println("⚠️ WiFi disconnected! Reconnecting...");
-            WiFi.disconnect();
-            WiFi.reconnect();  
+            LOGF("⚠️ WiFi disconnected! Attempting reconnect at %lu ms", millis());
+            WiFi.reconnect();
         }
     }
-
+*/
     delay(100);  // Reduce CPU usage instead of `sleep(0.1)`
 }
 
@@ -132,6 +132,7 @@ void checkForReboot() {
         if (strcasecmp(inputBuffer, "reboot") == 0) {
             logger.println("[DEBUG] Reboot command received! Restarting ESP32...");
             delay(500);
+            WiFi.disconnect(true, true);
             logger.flush();
             esp_restart();  // Perform software reboot
         }
