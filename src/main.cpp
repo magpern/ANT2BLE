@@ -4,6 +4,9 @@
 #include "logger.h"
 #include "esp_system.h"
 #include "esp_timer.h"  // ✅ ESP32 Software Timer API
+#include "wifi_manager.h"
+#include "websocket_manager.h"
+#include "led_service.h"
 
 #define SERIAL_BAUDRATE 115200
 #define FTMS_UPDATE_INTERVAL_US (2000000)  // 2 seconds in microseconds
@@ -24,6 +27,18 @@ void setup() {
 
     LOG("ESP32-S3 ANT+ to BLE FTMS");
 
+    wifi_init();  // ✅ Simple WiFi connection
+
+    // ✅ Ensure WiFi is connected before starting WebSockets
+    while (WiFi.status() != WL_CONNECTED) {
+        LOG("⏳ Waiting for WiFi...");
+        delay(1000);
+    }
+
+    LOG("🚀 Starting WebSocket Server...");
+    startWebSocketServer();
+    LOG("✅ WebSocket Server Started!");
+
     // Initialize BLE FTMS
     bleFTMS.begin();
 
@@ -32,7 +47,7 @@ void setup() {
     bleFTMS.setDisconnectCallback(onBLEDisconnect);
 
     // Print unique ESP32-S3 MAC address
-    LOG("Device MAC: " + bleFTMS.getDeviceMAC());
+    LOG("Device BLE MAC: " + bleFTMS.getDeviceMAC());
 
     // ✅ Set up FTMS update timer (but don't start it yet)
     const esp_timer_create_args_t timerArgs = {
@@ -45,6 +60,7 @@ void setup() {
 }
 
 void loop() {
+    static unsigned long lastReconnectAttempt = 0;  // Track last reconnect time
     antParser.readSerial();
     checkForReboot();  // Check if "reboot" command is received
 
@@ -53,7 +69,18 @@ void loop() {
         LOG("[WARN] BLE Advertising Stopped! Restarting...");
         NimBLEDevice::getAdvertising()->start(0);  // Restart indefinitely
     }
-    sleep(0.1);  // Save power by sleeping for 0.1 second
+
+    // ✅ Improved WiFi reconnection logic
+    if (WiFi.status() != WL_CONNECTED) {
+        if (millis() - lastReconnectAttempt > 5000) {  // Retry every 5 seconds
+            lastReconnectAttempt = millis();
+            Serial.println("⚠️ WiFi disconnected! Reconnecting...");
+            WiFi.disconnect();
+            WiFi.reconnect();  
+        }
+    }
+
+    delay(100);  // Reduce CPU usage instead of `sleep(0.1)`
 }
 
 // ✅ Timer Callback Function (Runs Every 2 Seconds When Connected)
